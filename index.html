@@ -127,6 +127,12 @@
         <!-- 預覽區塊 -->
         <div id="preview-section" class="mt-8 bg-white rounded-xl shadow-lg p-6 border border-gray-100 hidden">
             <h2 class="text-xl font-semibold mb-4 text-gray-700"><i class="fa-solid fa-list-check mr-2 text-purple-500"></i>問卷結構預覽</h2>
+            
+            <div id="preview-header" class="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 id="preview-title" class="text-lg font-bold text-gray-800 mb-2"></h3>
+                <p id="preview-desc" class="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed"></p>
+            </div>
+
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
@@ -163,6 +169,8 @@
         const copyBtn = document.getElementById('copy-btn');
         const actionHint = document.getElementById('action-hint');
         const previewSection = document.getElementById('preview-section');
+        const previewTitle = document.getElementById('preview-title'); // 新增：預覽標題
+        const previewDesc = document.getElementById('preview-desc');   // 新增：預覽說明
         const previewTbody = document.getElementById('preview-tbody');
 
         // 綁定點擊上傳事件
@@ -254,6 +262,10 @@
             const lines = rawText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
             const questions = [];
             let currentQuestion = null;
+            
+            let formTitle = "未命名長照研究問卷";
+            let formDescription = "";
+            let isParsingQuestions = false;
 
             // 簡易的正則表達式來判斷題幹與選項
             // 題幹判斷: 數字開頭加上點或頓號，例如 "1. " 或 "1、" 或 "Q1."
@@ -268,6 +280,7 @@
                 const oMatch = line.match(optionRegex);
 
                 if (qMatch) {
+                    isParsingQuestions = true; // 標記開始解析題目
                     // 若有正在處理的題目，先存起來
                     if (currentQuestion) {
                         questions.push(currentQuestion);
@@ -281,12 +294,20 @@
                 } else if (oMatch && currentQuestion) {
                     // 加入選項
                     currentQuestion.options.push(oMatch[2]);
-                } else if (currentQuestion && currentQuestion.options.length === 0) {
+                } else if (isParsingQuestions && currentQuestion && currentQuestion.options.length === 0) {
                     // 如果沒有匹配到選項格式，但接在題幹後面，且尚未有選項，可能題幹被換行了
                     currentQuestion.title += " " + line;
-                } else if (currentQuestion && currentQuestion.options.length > 0) {
+                } else if (isParsingQuestions && currentQuestion && currentQuestion.options.length > 0) {
                      // 可能是選項被換行了
                      currentQuestion.options[currentQuestion.options.length - 1] += " " + line;
+                } else if (!isParsingQuestions) {
+                    // 尚未進入題目解析，處理問卷標題與說明
+                    if (i === 0) {
+                        formTitle = line; // 第一行預設為標題
+                    } else {
+                        // 處理多行說明文字
+                        formDescription += (formDescription ? "\n" : "") + line;
+                    }
                 }
             }
 
@@ -300,13 +321,18 @@
                 return;
             }
 
-            renderPreview(questions);
-            generateScript(questions);
-            showToast(`成功萃取 ${questions.length} 道題目，已生成腳本！`, 'success');
+            renderPreview(formTitle, formDescription, questions);
+            generateScript(formTitle, formDescription, questions);
+            showToast(`成功萃取主題與 ${questions.length} 道題目，已生成腳本！`, 'success');
         }
 
         // 渲染預覽表格
-        function renderPreview(questions) {
+        function renderPreview(title, description, questions) {
+            // 渲染標題與說明
+            previewTitle.textContent = title;
+            previewDesc.textContent = description || "（未偵測到問卷說明，請確認您的 Word 檔案格式）";
+
+            // 渲染題目表格
             previewTbody.innerHTML = '';
             
             questions.forEach(q => {
@@ -335,13 +361,22 @@
         }
 
         // 生成 Google Apps Script 程式碼
-        function generateScript(questions) {
+        function generateScript(title, description, questions) {
             let script = `// 此腳本由「長照問卷自動化轉換系統」自動生成\n`;
             script += `// 請遵循 APA 第七版規範引用相關工具文獻\n\n`;
             script += `function createGoogleForm() {\n`;
             script += `  // 建立新表單\n`;
-            script += `  var form = FormApp.create('長照服務調查問卷 (自動生成)');\n`;
-            script += `  form.setDescription('感謝您撥冗填寫本問卷。本問卷旨在探討長照相關議題。');\n\n`;
+            
+            // 處理標題與說明的引號及換行跳脫字元
+            const safeTitle = title.replace(/'/g, "\\'");
+            const safeDescription = description.replace(/'/g, "\\'").replace(/\n/g, "\\n");
+
+            script += `  var form = FormApp.create('${safeTitle}');\n`;
+            if (safeDescription) {
+                script += `  form.setDescription('${safeDescription}');\n\n`;
+            } else {
+                script += `  // 無提供問卷說明\n\n`;
+            }
 
             questions.forEach(q => {
                 if (q.options.length > 0) {
