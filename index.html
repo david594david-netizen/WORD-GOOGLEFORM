@@ -266,36 +266,41 @@
             let formTitle = "未命名長照研究問卷";
             let formDescription = "";
             let isParsingQuestions = false;
-            let sharedOptions = null; // 新增：用於記憶李克特量表 (Likert Scale) 的共用選項
+            let sharedOptions = null; // 用於記憶共用選項
 
             // 題幹判斷：支援 A1., F1., 1. 等英數字組合開頭
-            const questionRegex = /^([A-Za-z0-9]+|[\u4e00-\u9fa5]+)[\.、．:：]\s*(.+)/;
+            const questionRegex = /^([a-zA-Z0-9\-]+|[\u4e00-\u9fa5]+)[\.、．:：]\s*(.+)/;
             // 選項判斷：支援 A., (1), 1) 等
             const optionRegex = /^([A-Ea-e][\.、．]|\(\d+\)|\d+\)|①|②|③|④|⑤)\s*(.+)/;
 
             for (let i = 0; i < lines.length; i++) {
                 let line = lines[i];
 
-                // 1. 偵測李克特量表 (Likert Scale) 表頭共用選項
-                if (line.includes('非常同意') && line.includes('不同意')) {
+                // 處理 Word 表格跨行表頭問題
+                if (line.includes('非常同意') || line.includes('不同意')) {
                     sharedOptions = ['非常同意', '同意', '沒意見', '不同意', '非常不同意'];
-                    continue; // 記憶完畢，跳下一行
+                    continue; 
                 }
-                // 偵測「是/否」表頭
                 if (line.includes('是') && line.includes('否') && line.length < 15) {
                     sharedOptions = ['是', '否'];
                     continue;
                 }
-                // 排除單純的分數列 (如 Word 表格中可能出現的 | 5 | 4 | 3 | 2 | 1 |)
-                if (line.match(/^[\|\s\d]+$/) && line.includes('1') && line.includes('5')) {
-                    continue;
-                }
 
-                // 2. 處理同行包含勾選框的題目或選項 (如：□（1）男 □（2）女)
+                // 清理表格分隔線 (|) 並去除首尾空白
+                line = line.replace(/\|/g, '').trim();
+                if (!line) continue;
+
+                // 排除單純的分數列 (如 Word 表格中可能出現的 5 4 3 2 1)
+                if (line.match(/^[\d\s]+$/)) continue;
+
                 let inlineOptions = [];
+                let numCheckboxes = 0; // 記錄勾選框數量
+                
                 if (line.includes('□') || line.includes('')) {
-                    // 統一特殊符號並進行切割
+                    // 統一特殊符號
                     const normalizedLine = line.replace(//g, '□');
+                    numCheckboxes = (normalizedLine.match(/□/g) || []).length;
+                    
                     const parts = normalizedLine.split('□').map(p => p.trim()).filter(p => p.length > 0);
                     
                     if (normalizedLine.indexOf('□') > 0) {
@@ -320,35 +325,49 @@
                     }
                 }
 
-                // 清理可能殘留的 Word 表格分隔線
-                line = line.replace(/^\|/g, '').replace(/\|$/g, '').trim();
+                if (numCheckboxes === 5 && inlineOptions.length === 0) {
+                    inlineOptions = ['非常同意', '同意', '沒意見', '不同意', '非常不同意'];
+                } else if (numCheckboxes === 2 && inlineOptions.length === 0) {
+                    inlineOptions = ['是', '否'];
+                }
 
                 const qMatch = line.match(questionRegex);
                 const oMatch = line.match(optionRegex);
 
-                if (qMatch) {
+                // 衝突排除：若是單一英文字母開頭，且已有題目，優先視為選項
+                let isOptionInsteadOfQuestion = false;
+                if (qMatch && currentQuestion) {
+                    const prefix = qMatch[1];
+                    if (/^[A-Ea-e]$/.test(prefix)) {
+                        isOptionInsteadOfQuestion = true;
+                    }
+                }
+
+                if (qMatch && !isOptionInsteadOfQuestion) {
                     isParsingQuestions = true; 
                     if (currentQuestion) {
                         questions.push(currentQuestion);
                     }
                     
-                    let qTitle = qMatch[2].replace(/\|/g, '').trim();
+                    let qTitle = qMatch[2].trim();
 
-                    // 建立新題目：優先使用行內選項，若無則套用共用選項 (Likert)
+                    // 建立新題目：優先使用行內選項，若無則套用共用選項
                     currentQuestion = {
                         number: qMatch[1],
                         title: qTitle,
                         options: inlineOptions.length > 0 ? inlineOptions : (sharedOptions ? [...sharedOptions] : [])
                     };
                 } else if (oMatch && currentQuestion) {
-                    currentQuestion.options.push(oMatch[2]);
+                    currentQuestion.options.push(oMatch[2].trim());
+                } else if (isOptionInsteadOfQuestion && currentQuestion) {
+                    currentQuestion.options.push(line.trim());
                 } else if (isParsingQuestions && currentQuestion) {
-                    // 處理題幹換行 (若沒有抓到選項，且非純選項行)
+                    // 處理題幹換行
                     if (currentQuestion.options.length === 0 && !line.includes('□')) {
                         currentQuestion.title += " " + line;
                     }
                 } else if (!isParsingQuestions) {
-                    // 由於 Word 檔開頭通常是知情同意書，第一行會被抓為標題
+                    // 記錄問卷標題與說明
                     if (formTitle === "未命名長照研究問卷") {
                         formTitle = line;
                     } else {
@@ -362,7 +381,7 @@
             }
 
             if (questions.length === 0) {
-                showToast('無法辨識問卷結構。請確認是否符合編排規範（題幹以數字或英文字母開頭，選項具備核取方塊或換行排列）。', 'error');
+                showToast('無法辨識問卷結構。請確認是否符合編排規範。', 'error');
                 return;
             }
 
