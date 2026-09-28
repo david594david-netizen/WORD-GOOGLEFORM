@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>長照問卷自動化轉換系統</title>
+    <!-- 引入 Tailwind CSS 進行快速排版與美化 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Mammoth.js 用於前端解析 Word (.docx) 檔案 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.21/mammoth.browser.min.js"></script>
+    <!-- 引入 FontAwesome 圖示 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Inter', '標楷體', 'Microsoft JhengHei', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .drag-active {
+            border-color: #3b82f6 !important;
+            background-color: #eff6ff !important;
+        }
+        .toast-enter {
+            transform: translateY(100%);
+            opacity: 0;
+        }
+        .toast-enter-active {
+            transform: translateY(0);
+            opacity: 1;
+            transition: all 0.3s ease-out;
+        }
+        .toast-exit {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .toast-exit-active {
+            transform: translateY(100%);
+            opacity: 0;
+            transition: all 0.3s ease-in;
+        }
+        /* 美化滾動條 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8; 
+        }
+    </style>
+</head>
+<body class="text-gray-800 antialiased min-h-screen flex flex-col">
+
+    <header class="bg-blue-800 text-white shadow-md py-6">
+        <div class="container mx-auto px-4 max-w-6xl flex justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold tracking-wider"><i class="fa-solid fa-file-word mr-2"></i>問卷轉換自動化系統</h1>
+                <p class="text-blue-200 text-sm mt-1">長照機構實務管理與學術研究輔助工具</p>
+            </div>
+            <div class="hidden md:block text-sm bg-blue-700 px-4 py-2 rounded-lg border border-blue-600 shadow-inner">
+                <i class="fa-solid fa-circle-info mr-1"></i> 純前端解析，保障研究數據隱私
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow container mx-auto px-4 py-8 max-w-6xl">
+        
+        <div class="bg-white rounded-xl shadow-lg p-6 mb-8 border border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">操作指引</h2>
+            <ol class="list-decimal list-inside text-gray-600 space-y-2 text-sm">
+                <li>準備您的 Word 問卷檔（必須為 <strong>.docx</strong> 格式）。</li>
+                <li>問卷題目請以數字開頭（如：「1. 您對居家服務的滿意度？」）。</li>
+                <li>選項請換行並以英文字母或數字括號開頭（如：「A. 非常滿意」、「(1) 同意」）。</li>
+                <li>上傳檔案後，系統將自動解析並生成 <strong>Google Apps Script</strong> 程式碼。</li>
+            </ol>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- 左側：上傳區 -->
+            <div class="flex flex-col h-full">
+                <div class="bg-white rounded-xl shadow-lg p-6 flex-grow border border-gray-100 flex flex-col">
+                    <h2 class="text-xl font-semibold mb-4 text-gray-700"><i class="fa-solid fa-cloud-arrow-up mr-2 text-blue-500"></i>1. 上傳 Word 問卷</h2>
+                    
+                    <div id="drop-zone" class="border-2 border-dashed border-gray-300 rounded-xl p-10 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-gray-50 transition-colors flex-grow min-h-[300px]">
+                        <i class="fa-regular fa-file-word text-6xl text-blue-400 mb-4"></i>
+                        <p class="text-gray-600 font-medium text-lg mb-2">點擊或拖曳 .docx 檔案至此</p>
+                        <p class="text-gray-400 text-sm mb-4">系統將自動讀取文字內容並進行解析</p>
+                        <input type="file" id="file-input" accept=".docx" class="hidden">
+                        <button class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg transition shadow-md">
+                            選擇檔案
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右側：結果與腳本區 -->
+            <div class="flex flex-col h-full">
+                <div class="bg-white rounded-xl shadow-lg p-6 flex-grow border border-gray-100 flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-semibold text-gray-700"><i class="fa-solid fa-code mr-2 text-green-500"></i>2. 獲取 Google 腳本</h2>
+                        <button id="copy-btn" class="bg-green-100 hover:bg-green-200 text-green-700 text-sm font-semibold py-1.5 px-4 rounded-md transition hidden">
+                            <i class="fa-regular fa-copy mr-1"></i> 複製腳本
+                        </button>
+                    </div>
+
+                    <div id="script-container" class="bg-gray-800 rounded-xl p-4 flex-grow relative overflow-hidden min-h-[300px] flex flex-col">
+                        <div id="placeholder" class="text-gray-400 flex flex-col items-center justify-center h-full absolute inset-0">
+                            <i class="fa-solid fa-terminal text-4xl mb-3 opacity-50"></i>
+                            <p>等待解析文件...</p>
+                        </div>
+                        <textarea id="script-output" class="w-full h-full flex-grow bg-transparent text-green-400 font-mono text-sm resize-none focus:outline-none hidden" readonly></textarea>
+                    </div>
+                    
+                    <div id="action-hint" class="mt-4 bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm p-3 rounded-lg hidden">
+                        <i class="fa-solid fa-lightbulb mr-1"></i> <strong>下一步：</strong>請前往 <a href="https://script.google.com" target="_blank" class="text-blue-600 underline font-semibold">script.google.com</a>，建立新專案，貼上上方腳本並點擊「執行」，即可自動建立 Google 表單。
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 預覽區塊 -->
+        <div id="preview-section" class="mt-8 bg-white rounded-xl shadow-lg p-6 border border-gray-100 hidden">
+            <h2 class="text-xl font-semibold mb-4 text-gray-700"><i class="fa-solid fa-list-check mr-2 text-purple-500"></i>問卷結構預覽</h2>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">題號</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">題目 (題幹)</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">類型</th>
+                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">選項</th>
+                        </tr>
+                    </thead>
+                    <tbody id="preview-tbody" class="bg-white divide-y divide-gray-200">
+                        <!-- 動態插入資料 -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <footer class="bg-gray-800 text-gray-400 py-6 text-center text-sm">
+        <p>長照與管理輔助科技研究工具 &copy; 2026</p>
+        <p class="mt-1">Designed by 大衛林老師 (Prof. David Lin) & 實驗室團隊</p>
+    </footer>
+
+    <!-- 自訂 Toast 訊息框 (取代 alert) -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2"></div>
+
+    <script>
+        // DOM 元素選取
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const scriptOutput = document.getElementById('script-output');
+        const placeholder = document.getElementById('placeholder');
+        const copyBtn = document.getElementById('copy-btn');
+        const actionHint = document.getElementById('action-hint');
+        const previewSection = document.getElementById('preview-section');
+        const previewTbody = document.getElementById('preview-tbody');
+
+        // 綁定點擊上傳事件
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        // 綁定拖曳事件
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('drag-active');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-active');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-active');
+            if (e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                handleFile(file);
+            }
+        });
+
+        // 綁定檔案選擇事件
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        // 綁定複製按鈕
+        copyBtn.addEventListener('click', copyToClipboard);
+
+        // 自訂訊息框 (Toast)
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            let bgColor = 'bg-blue-600';
+            let icon = 'fa-circle-info';
+            if (type === 'success') { bgColor = 'bg-green-600'; icon = 'fa-circle-check'; }
+            if (type === 'error') { bgColor = 'bg-red-600'; icon = 'fa-circle-exclamation'; }
+
+            toast.className = `${bgColor} text-white px-6 py-3 rounded-lg shadow-lg flex items-center transform transition-all duration-300 translate-y-10 opacity-0`;
+            toast.innerHTML = `<i class="fa-solid ${icon} mr-3"></i> <span>${message}</span>`;
+            
+            container.appendChild(toast);
+            
+            // 動畫進入
+            setTimeout(() => {
+                toast.classList.remove('translate-y-10', 'opacity-0');
+            }, 10);
+
+            // 3秒後消失
+            setTimeout(() => {
+                toast.classList.add('translate-y-10', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // 處理檔案讀取
+        function handleFile(file) {
+            if (!file.name.endsWith('.docx')) {
+                showToast('請上傳 .docx 格式的 Word 檔案，符合學術標準規範。', 'error');
+                return;
+            }
+
+            showToast('正在解析文件中，請稍候...', 'info');
+            
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+                
+                // 使用 Mammoth 提取純文字
+                mammoth.extractRawText({arrayBuffer: arrayBuffer})
+                    .then(function(result) {
+                        const text = result.value;
+                        processText(text);
+                    })
+                    .catch(function(err) {
+                        console.error(err);
+                        showToast('解析檔案發生錯誤，請確認檔案是否損毀。', 'error');
+                    });
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // 解析文字並轉換為結構化資料
+        function processText(rawText) {
+            const lines = rawText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+            const questions = [];
+            let currentQuestion = null;
+
+            // 簡易的正則表達式來判斷題幹與選項
+            // 題幹判斷: 數字開頭加上點或頓號，例如 "1. " 或 "1、" 或 "Q1."
+            const questionRegex = /^([Q0-9]+)[\.、．]\s*(.+)/;
+            
+            // 選項判斷: 字母或帶括號的數字開頭，例如 "A. " 或 "(1)" 或 "1)" 
+            const optionRegex = /^([A-Ea-e][\.、．]|\(\d+\)|\d+\))\s*(.+)/;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const qMatch = line.match(questionRegex);
+                const oMatch = line.match(optionRegex);
+
+                if (qMatch) {
+                    // 若有正在處理的題目，先存起來
+                    if (currentQuestion) {
+                        questions.push(currentQuestion);
+                    }
+                    // 建立新題目
+                    currentQuestion = {
+                        number: qMatch[1],
+                        title: qMatch[2],
+                        options: []
+                    };
+                } else if (oMatch && currentQuestion) {
+                    // 加入選項
+                    currentQuestion.options.push(oMatch[2]);
+                } else if (currentQuestion && currentQuestion.options.length === 0) {
+                    // 如果沒有匹配到選項格式，但接在題幹後面，且尚未有選項，可能題幹被換行了
+                    currentQuestion.title += " " + line;
+                } else if (currentQuestion && currentQuestion.options.length > 0) {
+                     // 可能是選項被換行了
+                     currentQuestion.options[currentQuestion.options.length - 1] += " " + line;
+                }
+            }
+
+            // 推入最後一題
+            if (currentQuestion) {
+                questions.push(currentQuestion);
+            }
+
+            if (questions.length === 0) {
+                showToast('無法辨識問卷結構。請確認是否符合編排規範（題幹以數字開頭，選項換行排列）。', 'error');
+                return;
+            }
+
+            renderPreview(questions);
+            generateScript(questions);
+            showToast(`成功萃取 ${questions.length} 道題目，已生成腳本！`, 'success');
+        }
+
+        // 渲染預覽表格
+        function renderPreview(questions) {
+            previewTbody.innerHTML = '';
+            
+            questions.forEach(q => {
+                const tr = document.createElement('tr');
+                
+                // 判斷題型 (簡單邏輯：大於1個選項為選擇題，否則為簡答題)
+                let typeStr = '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">單選題</span>';
+                if (q.options.length === 0) {
+                    typeStr = '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">簡答題</span>';
+                }
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Q${q.number}</td>
+                    <td class="px-6 py-4 text-sm text-gray-900 font-medium">${q.title}</td>
+                    <td class="px-6 py-4 whitespace-nowrap">${typeStr}</td>
+                    <td class="px-6 py-4 text-sm text-gray-500">
+                        <ul class="list-disc list-inside">
+                            ${q.options.map(opt => `<li>${opt}</li>`).join('')}
+                        </ul>
+                    </td>
+                `;
+                previewTbody.appendChild(tr);
+            });
+
+            previewSection.classList.remove('hidden');
+        }
+
+        // 生成 Google Apps Script 程式碼
+        function generateScript(questions) {
+            let script = `// 此腳本由「長照問卷自動化轉換系統」自動生成\n`;
+            script += `// 請遵循 APA 第七版規範引用相關工具文獻\n\n`;
+            script += `function createGoogleForm() {\n`;
+            script += `  // 建立新表單\n`;
+            script += `  var form = FormApp.create('長照服務調查問卷 (自動生成)');\n`;
+            script += `  form.setDescription('感謝您撥冗填寫本問卷。本問卷旨在探討長照相關議題。');\n\n`;
+
+            questions.forEach(q => {
+                if (q.options.length > 0) {
+                    script += `  // Q${q.number}\n`;
+                    script += `  var item${q.number} = form.addMultipleChoiceItem();\n`;
+                    script += `  item${q.number}.setTitle('${q.title.replace(/'/g, "\\'")}');\n`;
+                    
+                    const optionsArrayStr = q.options.map(opt => `'${opt.replace(/'/g, "\\'")}'`).join(', ');
+                    script += `  item${q.number}.setChoiceValues([${optionsArrayStr}]);\n`;
+                    script += `  item${q.number}.setRequired(true);\n\n`;
+                } else {
+                    script += `  // Q${q.number} (簡答)\n`;
+                    script += `  var item${q.number} = form.addParagraphTextItem();\n`;
+                    script += `  item${q.number}.setTitle('${q.title.replace(/'/g, "\\'")}');\n\n`;
+                }
+            });
+
+            script += `  // 獲取表單編輯網址與填寫網址\n`;
+            script += `  Logger.log('表單編輯網址: ' + form.getEditUrl());\n`;
+            script += `  Logger.log('問卷填寫網址: ' + form.getPublishedUrl());\n`;
+            script += `}\n`;
+
+            placeholder.classList.add('hidden');
+            scriptOutput.classList.remove('hidden');
+            scriptOutput.value = script;
+            
+            copyBtn.classList.remove('hidden');
+            actionHint.classList.remove('hidden');
+        }
+
+        // 複製腳本到剪貼簿
+        function copyToClipboard() {
+            if (!scriptOutput.value) return;
+            
+            // 使用較兼容的方法處理 iframe / 安全限制問題
+            scriptOutput.select();
+            scriptOutput.setSelectionRange(0, 99999); // 針對手機
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showToast('腳本已成功複製！請前往 Google Apps Script 貼上。', 'success');
+                } else {
+                    showToast('複製失敗，請手動全選複製。', 'error');
+                }
+            } catch (err) {
+                console.error('複製失敗', err);
+                showToast('複製失敗，請手動全選複製。', 'error');
+            }
+            
+            // 取消選取
+            window.getSelection().removeAllRanges();
+        }
+    </script>
+</body>
+</html>
